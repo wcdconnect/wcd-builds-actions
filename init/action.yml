@@ -62,7 +62,16 @@ runs:
             scope         = "api://wcdconnect.com/wcd-api-services/.default"
             grant_type    = "client_credentials"
           }
-          $t = Invoke-RestMethod -Uri "https://login.microsoftonline.com/${{ inputs.tenant_id }}/oauth2/v2.0/token" -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+          $tokenUri = "https://login.microsoftonline.com/${{ inputs.tenant_id }}/oauth2/v2.0/token"
+          try {
+            $t = Invoke-RestMethod -Uri $tokenUri -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+          } catch {
+            $statusCode = $_.Exception.Response?.StatusCode?.value__
+            $statusCode = if ($statusCode) { $statusCode } else { "unknown" }
+            Write-Host "::warning title=WCD Builds Auth Failed::Token request returned HTTP $statusCode. URI: $tokenUri"
+            if ($_.ErrorDetails.Message) { Write-Host "Response: $($_.ErrorDetails.Message)" }
+            throw
+          }
           if (-not $t.access_token) { throw "No access_token in response" }
           "WCD_BUILDS_TOKEN=$($t.access_token)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "::add-mask::$($t.access_token)"
