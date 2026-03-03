@@ -1,0 +1,78 @@
+name: 'WCD Builds - Init'
+description: 'Derive build service URL from environment, health-check the service, and acquire an Entra ID access token. Sets WCD_BUILDS_URL, WCD_BUILDS_AVAILABLE, and WCD_BUILDS_TOKEN as environment variables for subsequent actions.'
+
+inputs:
+  builds_service_url:
+    description: 'Optional override. If empty, derived from github.environment: Production → https://apps.wcdconnect.com/builds, else → https://appstest.wcdconnect.com/builds'
+    required: false
+    default: ''
+  client_id:
+    description: 'Entra ID application (client) ID'
+    required: true
+  client_secret:
+    description: 'Entra ID client secret'
+    required: true
+  tenant_id:
+    description: 'Entra ID tenant ID'
+    required: true
+
+outputs:
+  available:
+    description: 'Whether the WCD Builds service is available (true/false)'
+    value: ${{ steps.health.outputs.available }}
+  url:
+    description: 'Resolved build service URL'
+    value: ${{ steps.resolve.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: resolve
+      shell: pwsh
+      run: |
+        $inputUrl = "${{ inputs.builds_service_url }}".Trim()
+        if ($inputUrl) {
+          $url = $inputUrl.TrimEnd('/')
+        } elseif ("${{ github.environment }}" -eq 'Production') {
+          $url = 'https://apps.wcdconnect.com/builds'
+        } else {
+          $url = 'https://appstest.wcdconnect.com/builds'
+        }
+        "WCD_BUILDS_URL=$url" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        "url=$url" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        Write-Host "WCD Builds URL: $url"
+
+    - id: health
+      shell: pwsh
+      run: |
+        try {
+          $r = Invoke-WebRequest -Uri "$env:WCD_BUILDS_URL/health" -UseBasicParsing -Method Get -TimeoutSec 10
+          if ($r.StatusCode -ne 200) { throw "HTTP $($r.StatusCode)" }
+          "WCD_BUILDS_AVAILABLE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "WCD Builds service reachable."
+        } catch {
+          Write-Host "::warning title=WCD Builds Unavailable::$($_.Exception.Message)"
+          "WCD_BUILDS_AVAILABLE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "available=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        }
+
+    - id: auth
+      if: env.WCD_BUILDS_AVAILABLE == 'true'
+      shell: pwsh
+      run: |
+        try {
+          $body = @{
+            client_id     = "${{ inputs.client_id }}"
+            client_secret = "${{ inputs.client_secret }}"
+            scope         = "api://wcdconnect.com/wcd-api-services/.default"
+            grant_type    = "client_credentials"
+          }
+          $t = Invoke-RestMethod -Uri "https://login.microsoftonline.com/${{ inputs.tenant_id }}/oauth2/v2.0/token" -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+          if (-not $t.access_token) { throw "No access_token in response" }
+          "WCD_BUILDS_TOKEN=$($t.access_token)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "::add-mask::$($t.access_token)"
+        } catch {
+          Write-Host "::warning title=WCD Builds Auth Failed::$($_.Exception.Message)"
+          "WCD_BUILDS_AVAILABLE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        }

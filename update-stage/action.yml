@@ -1,0 +1,21 @@
+name: 'WCD Builds - Update Stage'
+description: 'Update the current build stage. Requires init and create-build to have run first.'
+
+inputs:
+  stage:
+    description: 'Stage name (e.g. Restoring, Building, Testing, Packaging, Publishing). Any string allowed for custom workflows.'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - if: env.WCD_BUILDS_AVAILABLE == 'true' && env.WCD_BUILD_ID != ''
+      shell: pwsh
+      run: |
+        try {
+          $stage = '${{ inputs.stage }}'
+          $body = @{ Stage = $stage } | ConvertTo-Json -Compress
+          Invoke-WebRequest -Uri "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID" -Method Post -Headers @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" } -Body $body -UseBasicParsing | Out-Null
+        } catch {
+          Write-Host "::warning title=WCD Update Stage::Stage ${{ inputs.stage }} failed: $($_.Exception.Message)"
+        }

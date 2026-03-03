@@ -1,0 +1,26 @@
+name: 'WCD Builds - Upload TRX'
+description: 'Find and upload a TRX test results file. Requires init and create-build to have run first.'
+
+inputs:
+  results_path:
+    description: 'Path to search for .trx files'
+    required: false
+    default: './TestResults'
+
+runs:
+  using: 'composite'
+  steps:
+    - if: env.WCD_BUILDS_AVAILABLE == 'true' && env.WCD_BUILD_ID != ''
+      shell: pwsh
+      run: |
+        $trx = Get-ChildItem -Path "${{ inputs.results_path }}" -Filter "*.trx" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($trx) {
+          try {
+            Invoke-WebRequest -Uri "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID/tests/trx" -Method Post -Headers @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/xml" } -InFile $trx.FullName -UseBasicParsing | Out-Null
+            Write-Host "Uploaded TRX: $($trx.Name)"
+          } catch {
+            Write-Host "::warning title=WCD TRX Upload::$($_.Exception.Message)"
+          }
+        } else {
+          Write-Host "No .trx files found in ${{ inputs.results_path }}"
+        }

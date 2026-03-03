@@ -1,0 +1,33 @@
+name: 'WCD Builds - Finalize'
+description: 'Finalize the build as Success or Failed. Adds dashboard link to job summary. Requires init and create-build to have run first.'
+
+inputs:
+  job_status:
+    description: 'The job status — pass ${{ job.status }}'
+    required: true
+
+outputs:
+  dashboard_url:
+    description: 'Direct link to the build on the dashboard'
+    value: ${{ steps.finalize.outputs.dashboard_url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: finalize
+      if: env.WCD_BUILDS_AVAILABLE == 'true' && env.WCD_BUILD_ID != ''
+      shell: pwsh
+      run: |
+        $state = if ("${{ inputs.job_status }}" -eq 'success') { 1 } else { 2 }
+        $errorMsg = if ("${{ inputs.job_status }}" -eq 'success') { '' } else { "Job status: ${{ inputs.job_status }}" }
+        $body = @{ State = $state; Stage = 6; ErrorMessage = $errorMsg } | ConvertTo-Json
+        try {
+          Invoke-WebRequest -Uri "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID" -Method Post -Headers @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" } -Body $body -UseBasicParsing | Out-Null
+          Write-Host "Finalized: state=$state"
+        } catch {
+          Write-Host "::warning title=WCD Finalize::$($_.Exception.Message)"
+        }
+        $dashUrl = "$env:WCD_BUILDS_URL/Builds/Detail?id=$env:WCD_BUILD_ID"
+        "dashboard_url=$dashUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        Write-Host "::notice title=WCD Build::$dashUrl"
+        "## WCD Build Reporting`n**Build:** [$env:WCD_BUILD_ID]($dashUrl)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
