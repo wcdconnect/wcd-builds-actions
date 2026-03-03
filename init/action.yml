@@ -3,9 +3,9 @@ description: 'Derive build service URL from environment, health-check the servic
 
 inputs:
   builds_service_url:
-    description: 'Optional override. If empty, derived from github.environment: Production → https://apps.wcdconnect.com/builds, else → https://appstest.wcdconnect.com/builds'
+    description: 'Optional override. If empty, defaults to https://appstest.wcdconnect.com/builds'
     required: false
-    default: ''
+    default: 'https://appstest.wcdconnect.com/builds'
   client_id:
     description: 'Entra ID application (client) ID'
     required: true
@@ -31,13 +31,7 @@ runs:
       shell: pwsh
       run: |
         $inputUrl = "${{ inputs.builds_service_url }}".Trim()
-        if ($inputUrl) {
-          $url = $inputUrl.TrimEnd('/')
-        } elseif ("${{ github.environment }}" -eq 'Production') {
-          $url = 'https://apps.wcdconnect.com/builds'
-        } else {
-          $url = 'https://appstest.wcdconnect.com/builds'
-        }
+        $url = if ($inputUrl) { $inputUrl.TrimEnd('/') } else { 'https://appstest.wcdconnect.com/builds' }
         "WCD_BUILDS_URL=$url" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         "url=$url" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         Write-Host "WCD Builds URL: $url"
