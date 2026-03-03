@@ -1,5 +1,5 @@
 name: 'WCD Builds - Init'
-description: 'Derive build service URL from environment, health-check the service, and acquire an Entra ID access token. Sets WCD_BUILDS_URL, WCD_BUILDS_AVAILABLE, and WCD_BUILDS_TOKEN as environment variables for subsequent actions.'
+description: 'Resolve build service URL, health-check the service, and acquire an access token via the service token-exchange endpoint (POST /api/auth/token). Sets WCD_BUILDS_URL, WCD_BUILDS_AVAILABLE, and WCD_BUILDS_TOKEN. Callers supply only client_id and client_secret; the server uses its configured tenant.'
 
 inputs:
   builds_service_url:
@@ -11,9 +11,6 @@ inputs:
     required: true
   client_secret:
     description: 'Entra ID client secret'
-    required: true
-  tenant_id:
-    description: 'Entra ID tenant ID'
     required: true
 
 outputs:
@@ -56,25 +53,21 @@ runs:
       shell: pwsh
       run: |
         try {
-          $body = @{
-            client_id     = "${{ inputs.client_id }}"
-            client_secret = "${{ inputs.client_secret }}"
-            scope         = "api://wcdconnect.com/wcd-api-services/.default"
-            grant_type    = "client_credentials"
-          }
-          $tokenUri = "https://login.microsoftonline.com/${{ inputs.tenant_id }}/oauth2/v2.0/token"
+          $tokenUrl = "$env:WCD_BUILDS_URL/api/auth/token"
+          $bodyObj = @{ clientId = "${{ inputs.client_id }}"; clientSecret = "${{ inputs.client_secret }}" }
+          $bodyJson = $bodyObj | ConvertTo-Json
           try {
-            $t = Invoke-RestMethod -Uri $tokenUri -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+            $r = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $bodyJson -ContentType "application/json" -TimeoutSec 15
           } catch {
             $statusCode = $_.Exception.Response?.StatusCode?.value__
             $statusCode = if ($statusCode) { $statusCode } else { "unknown" }
-            Write-Host "::warning title=WCD Builds Auth Failed::Token request returned HTTP $statusCode. URI: $tokenUri"
+            Write-Host "::warning title=WCD Builds Auth Failed::Token request returned HTTP $statusCode. URI: $tokenUrl"
             if ($_.ErrorDetails.Message) { Write-Host "Response: $($_.ErrorDetails.Message)" }
             throw
           }
-          if (-not $t.access_token) { throw "No access_token in response" }
-          "WCD_BUILDS_TOKEN=$($t.access_token)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "::add-mask::$($t.access_token)"
+          if (-not $r.accessToken) { throw "Response did not contain accessToken" }
+          "WCD_BUILDS_TOKEN=$($r.accessToken)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "::add-mask::$($r.accessToken)"
         } catch {
           Write-Host "::warning title=WCD Builds Auth Failed::$($_.Exception.Message)"
           "WCD_BUILDS_AVAILABLE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
