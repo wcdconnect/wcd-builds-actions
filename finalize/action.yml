@@ -3,7 +3,7 @@ description: 'Finalize the build as Success or Failed. Adds dashboard link to jo
 
 inputs:
   job_status:
-    description: 'The job status — pass ${{ job.status }}'
+    description: 'The job status (pass job.status)'
     required: true
 
 outputs:
