@@ -3,9 +3,9 @@ description: 'Resolve build service URL, health-check the service, and acquire a
 
 inputs:
   builds_service_url:
-    description: 'Optional override. If empty, defaults to https://appstest.wcdconnect.com/builds'
+    description: 'Optional override. If empty, defaults to https://builds.wcdconnect.com'
     required: false
-    default: 'https://appstest.wcdconnect.com/builds'
+    default: 'https://builds.wcdconnect.com'
   client_id:
     description: 'Entra ID application (client) ID'
     required: true
@@ -35,7 +35,7 @@ runs:
       shell: pwsh
       run: |
         $inputUrl = "${{ inputs.builds_service_url }}".Trim()
-        $url = if ($inputUrl) { $inputUrl.TrimEnd('/') } else { 'https://appstest.wcdconnect.com/builds' }
+        $url = if ($inputUrl) { $inputUrl.TrimEnd('/') } else { 'https://builds.wcdconnect.com' }
         "WCD_BUILDS_URL=$url" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         "url=$url" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         Write-Host "WCD Builds URL: $url"
