@@ -13,9 +13,9 @@ inputs:
     description: 'Entra ID client secret'
     required: true
   commit_message:
-    description: 'Optional commit message (e.g. github.event.head_commit.message). First line is output as build_display_name for use as build name in create-build.'
+    description: 'Optional commit message. Defaults to github.event.head_commit.message when available (e.g. push). First line is output as build_display_name and WCD_BUILDS_BUILD_NAME for create-build fallback.'
     required: false
-    default: ''
+    default: ${{ github.event.head_commit.message }}
 
 outputs:
   available:
