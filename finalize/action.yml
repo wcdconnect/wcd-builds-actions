@@ -21,11 +21,28 @@ runs:
         $state = if ("${{ inputs.job_status }}" -eq 'success') { 1 } else { 2 }
         $errorMsg = if ("${{ inputs.job_status }}" -eq 'success') { '' } else { "Job status: ${{ inputs.job_status }}" }
         $body = @{ State = $state; Stage = 6; ErrorMessage = $errorMsg } | ConvertTo-Json
-        try {
-          Invoke-WebRequest -Uri "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID" -Method Post -Headers @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" } -Body $body -UseBasicParsing | Out-Null
-          Write-Host "Finalized: state=$state"
-        } catch {
-          Write-Host "::warning title=WCD Finalize::$($_.Exception.Message)"
+        $uri = "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID"
+        $headers = @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" }
+        $maxAttempts = 3
+        $attempt = 0
+        $success = $false
+        while (-not $success -and $attempt -lt $maxAttempts) {
+          $attempt++
+          try {
+            Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -Body $body -UseBasicParsing -TimeoutSec 30 | Out-Null
+            Write-Host "Finalized: state=$state (attempt $attempt)"
+            $success = $true
+          } catch {
+            Write-Host "::warning title=WCD Finalize::Attempt $attempt/$maxAttempts failed: $($_.Exception.Message)"
+            if ($attempt -lt $maxAttempts) {
+              $delaySec = [Math]::Min(5 * $attempt, 15)
+              Write-Host "Retrying in ${delaySec}s..."
+              Start-Sleep -Seconds $delaySec
+            }
+          }
+        }
+        if (-not $success) {
+          Write-Host "::warning title=WCD Finalize::All $maxAttempts attempts failed. Build may remain Running on dashboard."
         }
         $dashUrl = "$env:WCD_BUILDS_URL/Builds/Detail?id=$env:WCD_BUILD_ID"
         "dashboard_url=$dashUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
