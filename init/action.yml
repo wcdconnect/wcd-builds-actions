@@ -1,5 +1,5 @@
 name: 'WCD Builds - Init'
-description: 'Resolve build service URL, health-check the service, and acquire an access token via the service token-exchange endpoint (POST /api/auth/token). Sets WCD_BUILDS_URL, WCD_BUILDS_AVAILABLE, and WCD_BUILDS_TOKEN. Callers supply only client_id and client_secret; the server uses its configured tenant.'
+description: 'Resolve build service URL, health-check the service, and acquire an access token via the service token-exchange endpoint (POST /api/auth/token). Sets WCD_BUILDS_URL, WCD_BUILDS_AVAILABLE, WCD_BUILDS_TOKEN, and WCD_BUILDS_BUILD_NAME (first line of commit_message). Callers supply only client_id and client_secret; the server uses its configured tenant.'
 
 inputs:
   builds_service_url:
@@ -12,6 +12,10 @@ inputs:
   client_secret:
     description: 'Entra ID client secret'
     required: true
+  commit_message:
+    description: 'Optional commit message (e.g. github.event.head_commit.message). First line is output as build_display_name for use as build name in create-build.'
+    required: false
+    default: ''
 
 outputs:
   available:
@@ -20,6 +24,9 @@ outputs:
   url:
     description: 'Resolved build service URL'
     value: ${{ steps.resolve.outputs.url }}
+  build_display_name:
+    description: 'First line of commit_message, truncated to 256 chars. Also set in WCD_BUILDS_BUILD_NAME env for create-build to use automatically.'
+    value: ${{ steps.build_display_name.outputs.build_display_name }}
 
 runs:
   using: 'composite'
@@ -72,3 +79,12 @@ runs:
           Write-Host "::warning title=WCD Builds Auth Failed::$($_.Exception.Message)"
           "WCD_BUILDS_AVAILABLE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         }
+
+    - id: build_display_name
+      shell: pwsh
+      run: |
+        $msg = "${{ inputs.commit_message }}".Trim()
+        $firstLine = if ($msg) { ($msg -split "`n")[0].Trim() } else { '' }
+        if ($firstLine.Length -gt 256) { $firstLine = $firstLine.Substring(0, 256) }
+        "build_display_name=$firstLine" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "WCD_BUILDS_BUILD_NAME=$firstLine" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

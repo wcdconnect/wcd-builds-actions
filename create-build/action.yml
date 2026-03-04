@@ -5,6 +5,10 @@ inputs:
   app_name:
     description: 'Project name to register'
     required: true
+  build_name:
+    description: 'Optional display name for the build. When empty, create-build uses WCD_BUILDS_BUILD_NAME set by init (first line of commit_message).'
+    required: false
+    default: ''
   branch_url:
     description: 'Optional branch URL for dashboard. If empty, derived from github context.'
     required: false
@@ -26,12 +30,27 @@ runs:
         if (-not $branchUrl) {
           $branchUrl = "${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}"
         }
+        $buildName = "${{ inputs.build_name }}".Trim()
+        if (-not $buildName -and $env:WCD_BUILDS_BUILD_NAME) {
+          $buildName = $env:WCD_BUILDS_BUILD_NAME.Trim()
+        }
+        if ($buildName) {
+          $firstLine = ($buildName -split "`n")[0].Trim()
+          if ($firstLine.Length -gt 512) { $firstLine = $firstLine.Substring(0, 512) }
+          $buildName = $firstLine
+        }
+        $runName = "${{ github.run_name }}".Trim()
+        $runNumRaw = "${{ github.run_number }}".Trim()
+        $runNumber = if ($runNumRaw -match '^\d+$') { [int]$runNumRaw } else { $null }
         $body = @{
           ProjectName      = "${{ inputs.app_name }}"
           BranchName       = "${{ github.ref_name }}"
           CommitSha        = "${{ github.sha }}"
           TriggerUser      = "${{ github.actor }}"
           ActionRunnerName = $env:RUNNER_NAME
+          BuildName        = if ($buildName) { $buildName } else { $null }
+          GitHubRunName    = if ($runName) { $runName } else { $null }
+          GitHubRunNumber  = $runNumber
           GitHubActionUrl  = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           BranchUrl        = $branchUrl
         } | ConvertTo-Json
