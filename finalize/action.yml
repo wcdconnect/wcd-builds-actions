@@ -1,5 +1,13 @@
 name: 'WCD Builds - Finalize'
-description: 'Finalize the build as Success or Failed. Uses job.status (success | failure | cancelled). Adds dashboard link to job summary. Requires init and create-build to have run first.'
+description: 'Finalize the build as Success or Failed. Uses job.status (success | failure | cancelled). Optionally send error details from a file or input for the dashboard. Requires init and create-build to have run first.'
+
+inputs:
+  error_message:
+    description: 'Optional error message to send when job failed (e.g. from a previous step output). Overrides default "Job status: failure".'
+    required: false
+  error_log_path:
+    description: 'Optional path to a file (relative to GITHUB_WORKSPACE) containing job output to send when failed, e.g. build.log. When job failed, file content is sent as ErrorMessage (truncated to 32KB). Workflows can append step output (restore, build, test, etc.) to one file so any failure is visible. Ignored if error_message is set.'
+    required: false
 
 outputs:
   dashboard_url:
@@ -13,10 +21,36 @@ runs:
       if: env.WCD_BUILDS_AVAILABLE == 'true' && env.WCD_BUILD_ID != ''
       env:
         JOB_STATUS: ${{ job.status }}
+        WCD_ERROR_MESSAGE: ${{ inputs.error_message }}
+        WCD_ERROR_LOG_PATH: ${{ inputs.error_log_path }}
       shell: pwsh
       run: |
         $state = if ($env:JOB_STATUS -eq 'success') { 1 } else { 2 }
-        $errorMsg = if ($env:JOB_STATUS -eq 'success') { '' } else { "Job status: $env:JOB_STATUS" }
+        $errorMsg = ''
+        if ($env:JOB_STATUS -ne 'success') {
+          if (-not [string]::IsNullOrWhiteSpace($env:WCD_ERROR_MESSAGE)) {
+            $errorMsg = $env:WCD_ERROR_MESSAGE.Trim()
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:WCD_ERROR_LOG_PATH)) {
+            $logPath = $env:WCD_ERROR_LOG_PATH
+            if (-not [System.IO.Path]::IsPathRooted($logPath)) {
+              $logPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $logPath
+            }
+            if (Test-Path -LiteralPath $logPath -PathType Leaf) {
+              $content = Get-Content -LiteralPath $logPath -Raw -ErrorAction SilentlyContinue
+              if ($content) {
+                $maxLen = 32768
+                if ($content.Length -gt $maxLen) {
+                  $content = $content.Substring($content.Length - $maxLen)
+                  $content = "... (truncated, last $maxLen chars)`n`n" + $content
+                }
+                $errorMsg = $content.Trim()
+              }
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($errorMsg)) {
+            $errorMsg = "Job status: $env:JOB_STATUS"
+          }
+        }
         $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg } | ConvertTo-Json
         $uri = "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID"
         $headers = @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" }
