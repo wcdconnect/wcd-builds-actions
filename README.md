@@ -48,8 +48,6 @@ steps:
 
   - if: always()
     uses: wcdconnect/wcd-builds-actions/finalize@main
-    with:
-      job_status: ${{ job.status }}
 ```
 
 For full documentation see the [WCD Builds docs](https://github.com/wcdconnect/wcd-builds/tree/main/docs/app/using-workflow.md).

@@ -1,10 +1,5 @@
 name: 'WCD Builds - Finalize'
-description: 'Finalize the build as Success or Failed. Adds dashboard link to job summary. Requires init and create-build to have run first.'
-
-inputs:
-  job_status:
-    description: 'The job status (pass job.status)'
-    required: true
+description: 'Finalize the build as Success or Failed. Uses job.status (success | failure | cancelled). Adds dashboard link to job summary. Requires init and create-build to have run first.'
 
 outputs:
   dashboard_url:
@@ -16,11 +11,13 @@ runs:
   steps:
     - id: finalize
       if: env.WCD_BUILDS_AVAILABLE == 'true' && env.WCD_BUILD_ID != ''
+      env:
+        JOB_STATUS: ${{ job.status }}
       shell: pwsh
       run: |
-        $state = if ("${{ inputs.job_status }}" -eq 'success') { 1 } else { 2 }
-        $errorMsg = if ("${{ inputs.job_status }}" -eq 'success') { '' } else { "Job status: ${{ inputs.job_status }}" }
-        $body = @{ State = $state; Stage = 6; ErrorMessage = $errorMsg } | ConvertTo-Json
+        $state = if ($env:JOB_STATUS -eq 'success') { 1 } else { 2 }
+        $errorMsg = if ($env:JOB_STATUS -eq 'success') { '' } else { "Job status: $env:JOB_STATUS" }
+        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg } | ConvertTo-Json
         $uri = "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID"
         $headers = @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" }
         $maxAttempts = 3
