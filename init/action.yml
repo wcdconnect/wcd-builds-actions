@@ -82,8 +82,10 @@ runs:
 
     - id: build_display_name
       shell: pwsh
+      env:
+        COMMIT_MSG: ${{ inputs.commit_message }}
       run: |
-        $msg = "${{ inputs.commit_message }}".Trim()
+        $msg = $env:COMMIT_MSG.Trim()
         $firstLine = if ($msg) { ($msg -split "`n")[0].Trim() } else { '' }
         if ($firstLine.Length -gt 256) { $firstLine = $firstLine.Substring(0, 256) }
         "build_display_name=$firstLine" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
