@@ -8,6 +8,10 @@ inputs:
   error_log_path:
     description: 'Optional path to a file (relative to GITHUB_WORKSPACE) containing job output to send when failed, e.g. build.log. When job failed, file content is sent as ErrorMessage (truncated to 32KB). Workflows can append step output (restore, build, test, etc.) to one file so any failure is visible. Ignored if error_message is set.'
     required: false
+  version:
+    description: 'Optional version string (e.g. NuGet package version) to display in the Teams notification and dashboard.'
+    required: false
+    default: ''
 
 outputs:
   dashboard_url:
@@ -23,6 +27,7 @@ runs:
         JOB_STATUS: ${{ job.status }}
         WCD_ERROR_MESSAGE: ${{ inputs.error_message }}
         WCD_ERROR_LOG_PATH: ${{ inputs.error_log_path }}
+        WCD_VERSION: ${{ inputs.version }}
       shell: pwsh
       run: |
         $state = if ($env:JOB_STATUS -eq 'success') { 1 } else { 2 }
@@ -51,7 +56,7 @@ runs:
             $errorMsg = "Job status: $env:JOB_STATUS"
           }
         }
-        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg } | ConvertTo-Json
+        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg; Version = $env:WCD_VERSION } | ConvertTo-Json
         $uri = "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID"
         $headers = @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" }
         $maxAttempts = 3
