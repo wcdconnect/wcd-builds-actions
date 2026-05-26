@@ -14,6 +14,7 @@ Do not edit files in this repository directly. Submit changes to the source repo
 | **create-build** | Register a new build with the API |
 | **update-stage** | Update the build stage (e.g. Restoring, Building, Testing, Packaging, Publishing) |
 | **upload-trx** | Find and upload TRX test results |
+| **summarize-trx** | Textual TRX summary on GitHub job summary (counts, failures, slowest) |
 | **finalize** | Report success/failure, write dashboard link to job summary |
 
 ## Environment Variables (set by the actions)
@@ -45,6 +46,9 @@ steps:
 
   - if: always()
     uses: wcdconnect/wcd-builds-actions/upload-trx@main
+
+  - if: always()
+    uses: wcdconnect/wcd-builds-actions/summarize-trx@main
 
   - if: always()
     uses: wcdconnect/wcd-builds-actions/finalize@main

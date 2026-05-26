@@ -1,0 +1,251 @@
+name: 'WCD Builds - Summarize TRX'
+description: 'Parse a TRX file and append a textual test summary (counts, failures, slowest tests) to the GitHub Actions job summary. Does not upload TRX to GitHub.'
+
+inputs:
+  results_path:
+    description: 'Directory to search for .trx files (same as upload-trx)'
+    required: false
+    default: './TestResults'
+  max_failed:
+    description: 'Maximum failed tests to list in the summary'
+    required: false
+    default: '25'
+  max_slowest:
+    description: 'Maximum slowest tests to list in the summary'
+    required: false
+    default: '10'
+  max_skipped:
+    description: 'Maximum skipped tests to list in the summary'
+    required: false
+    default: '20'
+
+runs:
+  using: 'composite'
+  steps:
+    - id: summarize
+      shell: pwsh
+      env:
+        RESULTS_PATH: ${{ inputs.results_path }}
+        MAX_FAILED: ${{ inputs.max_failed }}
+        MAX_SLOWEST: ${{ inputs.max_slowest }}
+        MAX_SKIPPED: ${{ inputs.max_skipped }}
+      run: |
+        function Escape-MarkdownCell {
+          param([string]$Text, [int]$MaxLength = 200)
+          if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+          $value = $Text -replace '\|', '\|' -replace "`r?`n", ' '
+          if ($value.Length -gt $MaxLength) {
+            $value = $value.Substring(0, $MaxLength) + '…'
+          }
+          return $value
+        }
+
+        function Get-DurationSeconds {
+          param([string]$DurationStr)
+          if ([string]::IsNullOrWhiteSpace($DurationStr)) { return 0.0 }
+          $ts = [TimeSpan]::Zero
+          if ([TimeSpan]::TryParse($DurationStr, [ref]$ts)) {
+            return $ts.TotalSeconds
+          }
+          return 0.0
+        }
+
+        function Format-Duration {
+          param([double]$Seconds)
+          if ($Seconds -le 0) { return '—' }
+          $ts = [TimeSpan]::FromSeconds($Seconds)
+          if ($ts.TotalHours -ge 1) {
+            return $ts.ToString('hh\:mm\:ss\.fff')
+          }
+          return $ts.ToString('mm\:ss\.fff')
+        }
+
+        function Get-OutcomeCategory {
+          param([string]$Outcome)
+          switch ($Outcome.ToLowerInvariant()) {
+            'passed' { return 'Passed' }
+            'failed' { return 'Failed' }
+            'notexecuted' { return 'Skipped' }
+            'skipped' { return 'Skipped' }
+            'inconclusive' { return 'Skipped' }
+            'pending' { return 'Skipped' }
+            default { return 'Failed' }
+          }
+        }
+
+        try {
+          $trxFile = Get-ChildItem -Path $env:RESULTS_PATH -Filter '*.trx' -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $trxFile) {
+            Write-Host "No .trx files found in $env:RESULTS_PATH"
+            "## Test Results Summary`n`n_No TRX file found under ``$($env:RESULTS_PATH)``._" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            return
+          }
+
+          Write-Host "Summarizing TRX: $($trxFile.FullName)"
+
+          [xml]$doc = Get-Content -LiteralPath $trxFile.FullName -Raw -Encoding UTF8
+          $nsUri = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
+          $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
+          $ns.AddNamespace('t', $nsUri)
+
+          $summaryLines = [System.Collections.Generic.List[string]]::new()
+          $summaryLines.Add('## Test Results Summary')
+          $summaryLines.Add('')
+          $summaryLines.Add("**TRX file:** ``$($trxFile.Name)``")
+
+          $countersNode = $doc.SelectSingleNode('//t:ResultSummary/t:Counters', $ns)
+          $unitResults = @($doc.SelectNodes('//t:Results/t:UnitTestResult', $ns))
+
+          $passed = 0
+          $failed = 0
+          $skipped = 0
+          $total = $unitResults.Count
+
+          if ($countersNode) {
+            $totalAttr = $countersNode.GetAttribute('total')
+            if (-not [string]::IsNullOrWhiteSpace($totalAttr)) { $total = [int]$totalAttr }
+            $passedAttr = $countersNode.GetAttribute('passed')
+            if (-not [string]::IsNullOrWhiteSpace($passedAttr)) { $passed = [int]$passedAttr }
+            $failedAttr = $countersNode.GetAttribute('failed')
+            if (-not [string]::IsNullOrWhiteSpace($failedAttr)) { $failed = [int]$failedAttr }
+            $notExecutedAttr = $countersNode.GetAttribute('notExecuted')
+            $inconclusiveAttr = $countersNode.GetAttribute('inconclusive')
+            $skippedCount = 0
+            if (-not [string]::IsNullOrWhiteSpace($notExecutedAttr)) { $skippedCount += [int]$notExecutedAttr }
+            if (-not [string]::IsNullOrWhiteSpace($inconclusiveAttr)) { $skippedCount += [int]$inconclusiveAttr }
+            $skipped = $skippedCount
+          }
+
+          $parsed = foreach ($result in $unitResults) {
+            $testName = $result.GetAttribute('testName')
+            if ([string]::IsNullOrWhiteSpace($testName)) { $testName = 'Unknown' }
+            $outcomeRaw = $result.GetAttribute('outcome')
+            if ([string]::IsNullOrWhiteSpace($outcomeRaw)) { $outcomeRaw = 'Failed' }
+            $category = Get-OutcomeCategory -Outcome $outcomeRaw
+            $durationSeconds = Get-DurationSeconds -DurationStr $result.GetAttribute('duration')
+
+            $errorMessage = $null
+            $errInfo = $result.SelectSingleNode('t:Output/t:ErrorInfo', $ns)
+            if ($errInfo) {
+              $messageNode = $errInfo.SelectSingleNode('t:Message', $ns)
+              if ($messageNode) { $errorMessage = $messageNode.InnerText.Trim() }
+            }
+
+            if (-not $countersNode) {
+              switch ($category) {
+                'Passed' { $passed++ }
+                'Failed' { $failed++ }
+                'Skipped' { $skipped++ }
+              }
+            }
+
+            [PSCustomObject]@{
+              TestName = $testName
+              Outcome = $category
+              OutcomeRaw = $outcomeRaw
+              DurationSeconds = $durationSeconds
+              ErrorMessage = $errorMessage
+            }
+          }
+
+          if (-not $countersNode -and $total -eq 0) {
+            $total = $parsed.Count
+          }
+
+          $runDurationNode = $doc.SelectSingleNode('//t:Times', $ns)
+          $runDuration = ''
+          if ($runDurationNode) {
+            $start = $runDurationNode.GetAttribute('creation')
+            $finish = $runDurationNode.GetAttribute('finish')
+            if ($start -and $finish) {
+              try {
+                $startDt = [DateTime]::Parse($start)
+                $finishDt = [DateTime]::Parse($finish)
+                $runDuration = Format-Duration -Seconds ($finishDt - $startDt).TotalSeconds
+              } catch {
+                $runDuration = ''
+              }
+            }
+          }
+
+          $summaryLines.Add('')
+          $summaryLines.Add('| Metric | Count |')
+          $summaryLines.Add('|--------|------:|')
+          $summaryLines.Add("| Total | $total |")
+          $summaryLines.Add("| Passed | $passed |")
+          $summaryLines.Add("| Failed | $failed |")
+          $summaryLines.Add("| Skipped | $skipped |")
+          if ($runDuration) {
+            $summaryLines.Add('')
+            $summaryLines.Add("**Run duration:** $runDuration")
+          }
+
+          $maxFailed = [int]$env:MAX_FAILED
+          $maxSlowest = [int]$env:MAX_SLOWEST
+          $maxSkipped = [int]$env:MAX_SKIPPED
+          if ($maxFailed -lt 1) { $maxFailed = 25 }
+          if ($maxSlowest -lt 1) { $maxSlowest = 10 }
+          if ($maxSkipped -lt 1) { $maxSkipped = 20 }
+
+          $failedTests = @($parsed | Where-Object { $_.Outcome -eq 'Failed' })
+          if ($failedTests.Count -gt 0) {
+            $summaryLines.Add('')
+            $summaryLines.Add('### Failed tests')
+            $summaryLines.Add('')
+            $summaryLines.Add('| Test | Duration | Error |')
+            $summaryLines.Add('|------|----------|-------|')
+            foreach ($test in ($failedTests | Select-Object -First $maxFailed)) {
+              $duration = Format-Duration -Seconds $test.DurationSeconds
+              $errorText = Escape-MarkdownCell -Text $test.ErrorMessage
+              $name = Escape-MarkdownCell -Text $test.TestName -MaxLength 300
+              $summaryLines.Add("| $name | $duration | $errorText |")
+            }
+            if ($failedTests.Count -gt $maxFailed) {
+              $summaryLines.Add('')
+              $summaryLines.Add("_+$($failedTests.Count - $maxFailed) more failed test(s) not shown._")
+            }
+          }
+
+          $slowest = @($parsed | Where-Object { $_.DurationSeconds -gt 0 } | Sort-Object DurationSeconds -Descending | Select-Object -First $maxSlowest)
+          if ($slowest.Count -gt 0) {
+            $summaryLines.Add('')
+            $summaryLines.Add('### Slowest tests')
+            $summaryLines.Add('')
+            $summaryLines.Add('| Test | Duration | Outcome |')
+            $summaryLines.Add('|------|----------|---------|')
+            foreach ($test in $slowest) {
+              $duration = Format-Duration -Seconds $test.DurationSeconds
+              $name = Escape-MarkdownCell -Text $test.TestName -MaxLength 300
+              $summaryLines.Add("| $name | $duration | $($test.Outcome) |")
+            }
+          }
+
+          $skippedTests = @($parsed | Where-Object { $_.Outcome -eq 'Skipped' })
+          if ($skippedTests.Count -gt 0) {
+            $summaryLines.Add('')
+            $summaryLines.Add('### Skipped tests')
+            $summaryLines.Add('')
+            $summaryLines.Add('| Test | Duration |')
+            $summaryLines.Add('|------|----------|')
+            foreach ($test in ($skippedTests | Select-Object -First $maxSkipped)) {
+              $duration = Format-Duration -Seconds $test.DurationSeconds
+              $name = Escape-MarkdownCell -Text $test.TestName -MaxLength 300
+              $summaryLines.Add("| $name | $duration |")
+            }
+            if ($skippedTests.Count -gt $maxSkipped) {
+              $summaryLines.Add('')
+              $summaryLines.Add("_+$($skippedTests.Count - $maxSkipped) more skipped test(s) not shown._")
+            }
+          }
+
+          if ($env:WCD_BUILDS_URL -and $env:WCD_BUILD_ID) {
+            $dashUrl = "$($env:WCD_BUILDS_URL)/Builds/Detail?id=$($env:WCD_BUILD_ID)"
+            $summaryLines.Add('')
+            $summaryLines.Add("**WCD Builds dashboard:** [$($env:WCD_BUILD_ID)]($dashUrl)")
+          }
+
+          ($summaryLines -join "`n") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Host "Test summary written to job summary ($total total, $passed passed, $failed failed, $skipped skipped)."
+        } catch {
+          Write-Host "::warning title=WCD TRX Summarize::$($_.Exception.Message)"
+        }
