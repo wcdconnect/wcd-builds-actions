@@ -1,0 +1,28 @@
+name: 'WCD Builds - Validate Project References'
+description: 'Scan all .csproj files for ProjectReference entries that resolve outside the repository. Catches accidental commits of local project references (debug solution changes) that would break CI. Should be used in top-level application workflows after checkout.'
+
+runs:
+  using: 'composite'
+  steps:
+    - shell: pwsh
+      run: |
+        $errors = 0
+        Get-ChildItem -Recurse -Filter *.csproj | Where-Object { $_.FullName -notmatch '\\obj\\' } | ForEach-Object {
+          [xml]$xml = Get-Content $_.FullName
+          foreach ($ig in $xml.Project.ItemGroup) {
+            if ($null -eq $ig.ProjectReference) { continue }
+            foreach ($ref in $ig.ProjectReference) {
+              $resolved = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($_.DirectoryName, $ref.Include))
+              if (-not (Test-Path $resolved)) {
+                Write-Host "[ERROR] $($_.Name): ProjectReference '$($ref.Include)' -> '$resolved' does not exist in this repository" -ForegroundColor Red
+                $errors++
+              }
+            }
+          }
+        }
+        if ($errors -gt 0) {
+          Write-Host ""
+          Write-Host "[FATAL] $errors broken ProjectReference(s) found. A .csproj was likely committed with a local project reference instead of a NuGet package." -ForegroundColor Red
+          exit 1
+        }
+        Write-Host "All project references validated" -ForegroundColor Green
