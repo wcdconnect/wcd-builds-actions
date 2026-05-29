@@ -16,6 +16,7 @@ Do not edit files in this repository directly. Submit changes to the source repo
 | **upload-trx** | Find and upload TRX test results |
 | **summarize-trx** | Textual TRX summary on GitHub job summary (counts, failures, slowest) |
 | **finalize** | Report success/failure, write dashboard link to job summary |
+| **validate-project-references** | Scan .csproj files for broken ProjectReference entries (local debug references committed by mistake) |
 
 ## Environment Variables (set by the actions)
 
