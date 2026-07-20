@@ -1,5 +1,5 @@
 name: 'WCD Builds - Finalize'
-description: 'Finalize the build as Success or Failed. Uses job.status (success | failure | cancelled). Optionally send error details from a file or input for the dashboard. Requires init and create-build to have run first.'
+description: 'Finalize the build as Success or Failed. Uses job.status (success | failure | cancelled). Optionally send error details from a file or input for the dashboard. Job summary is fetched server-side from GitHub after the workflow job completes. Requires init and create-build to have run first.'
 
 inputs:
   error_message:
@@ -56,54 +56,8 @@ runs:
             $errorMsg = "Job status: $env:JOB_STATUS"
           }
         }
-        $summary = ''
-        function Get-RunnerStepSummaries {
-          if ([string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) { return '' }
-          $summaryDir = Split-Path -Parent $env:GITHUB_STEP_SUMMARY
-          if (-not (Test-Path -LiteralPath $summaryDir)) { return '' }
-          $files = Get-ChildItem -LiteralPath $summaryDir -Filter 'step_summary_*' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
-          if (-not $files -or $files.Count -eq 0) { return '' }
-          $parts = [System.Collections.Generic.List[string]]::new()
-          foreach ($file in $files) {
-            $content = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
-            if (-not [string]::IsNullOrWhiteSpace($content)) {
-              $parts.Add($content.Trim())
-            }
-          }
-          if ($parts.Count -eq 0) { return '' }
-          return ($parts -join "`n`n---`n`n")
-        }
-        $summary = Get-RunnerStepSummaries
-        if ([string]::IsNullOrWhiteSpace($summary)) {
-          $sharedSummaryPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath '.wcd-build-summary.md'
-          if (Test-Path -LiteralPath $sharedSummaryPath -PathType Leaf) {
-            $summaryContent = Get-Content -LiteralPath $sharedSummaryPath -Raw -ErrorAction SilentlyContinue
-            if ($summaryContent) {
-              $summary = $summaryContent.Trim()
-            }
-          }
-        }
-        if ([string]::IsNullOrWhiteSpace($summary) -and $env:GITHUB_STEP_SUMMARY -and (Test-Path -LiteralPath $env:GITHUB_STEP_SUMMARY -PathType Leaf)) {
-          $summaryContent = Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Raw -ErrorAction SilentlyContinue
-          if ($summaryContent) {
-            $summary = $summaryContent.Trim()
-          }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($summary)) {
-          $summaryMaxLen = 32768
-          if ($summary.Length -gt $summaryMaxLen) {
-            $summary = $summary.Substring($summary.Length - $summaryMaxLen)
-            $summary = "... (truncated, last $summaryMaxLen chars)`n`n" + $summary
-          }
-          Write-Host "Captured job summary for dashboard: $($summary.Length) characters"
-        } else {
-          Write-Host "No job summary content found to send to dashboard."
-        }
-        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg; Version = $env:WCD_VERSION }
-        if (-not [string]::IsNullOrWhiteSpace($summary)) {
-          $body.Summary = $summary
-        }
-        $body = $body | ConvertTo-Json
+        Write-Host "Job summary will be fetched by WCD Builds from GitHub after this job completes."
+        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg; Version = $env:WCD_VERSION } | ConvertTo-Json
         $uri = "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID"
         $headers = @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" }
         $maxAttempts = 3

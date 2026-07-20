@@ -78,8 +78,6 @@ runs:
           if (-not $trxFile) {
             Write-Host "No .trx files found in $env:RESULTS_PATH"
             "## Test Results Summary`n`n_No TRX file found under ``$($env:RESULTS_PATH)``._" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-            $sharedSummaryPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath '.wcd-build-summary.md'
-            "## Test Results Summary`n`n_No TRX file found under ``$($env:RESULTS_PATH)``._" | Out-File -FilePath $sharedSummaryPath -Append -Encoding utf8
             return
           }
 
@@ -248,8 +246,6 @@ runs:
 
           $markdown = ($summaryLines -join "`n")
           $markdown | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          $sharedSummaryPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath '.wcd-build-summary.md'
-          $markdown | Out-File -FilePath $sharedSummaryPath -Append -Encoding utf8
           Write-Host "Test summary written to job summary ($total total, $passed passed, $failed failed, $skipped skipped)."
         } catch {
           Write-Host "::warning title=WCD TRX Summarize::$($_.Exception.Message)"
