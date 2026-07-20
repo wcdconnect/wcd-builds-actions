@@ -56,7 +56,23 @@ runs:
             $errorMsg = "Job status: $env:JOB_STATUS"
           }
         }
-        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg; Version = $env:WCD_VERSION } | ConvertTo-Json
+        $summary = ''
+        if ($env:GITHUB_STEP_SUMMARY -and (Test-Path -LiteralPath $env:GITHUB_STEP_SUMMARY -PathType Leaf)) {
+          $summaryContent = Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Raw -ErrorAction SilentlyContinue
+          if ($summaryContent) {
+            $summary = $summaryContent.Trim()
+            $summaryMaxLen = 32768
+            if ($summary.Length -gt $summaryMaxLen) {
+              $summary = $summary.Substring($summary.Length - $summaryMaxLen)
+              $summary = "... (truncated, last $summaryMaxLen chars)`n`n" + $summary
+            }
+          }
+        }
+        $body = @{ State = $state; Stage = 'Completed'; ErrorMessage = $errorMsg; Version = $env:WCD_VERSION }
+        if (-not [string]::IsNullOrWhiteSpace($summary)) {
+          $body.Summary = $summary
+        }
+        $body = $body | ConvertTo-Json
         $uri = "$env:WCD_BUILDS_URL/api/builds/$env:WCD_BUILD_ID"
         $headers = @{ Authorization = "Bearer $env:WCD_BUILDS_TOKEN"; "Content-Type" = "application/json" }
         $maxAttempts = 3

@@ -55,4 +55,4 @@ steps:
     uses: wcdconnect/wcd-builds-actions/finalize@main
 ```
 
-For full documentation see the [WCD Builds docs](https://github.com/wcdconnect/wcd-builds/tree/main/docs/app/using-workflow.md).
+For full documentation see the [WCD Builds docs](https://github.com/wcdconnect/wcd-builds/tree/main/docs/app/using-wcd-builds-workflow.md).
