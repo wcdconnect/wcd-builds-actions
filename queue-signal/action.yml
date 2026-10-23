@@ -1,0 +1,43 @@
+name: 'WCD Builds - Queue Signal'
+description: 'Notify the build service that a workflow run was just submitted so queue polling becomes active. Acquires a token via POST /api/auth/token, then POSTs /api/builds/queue-signal. Tolerates all failures with a warning; never fails the consuming workflow. Run this as a separate first job on a GitHub-hosted runner (not as a step in the job that waits for a self-hosted runner).'
+
+inputs:
+  builds_service_url:
+    description: 'Optional override. If empty, defaults to https://builds.wcdconnect.com'
+    required: false
+    default: 'https://builds.wcdconnect.com'
+  client_id:
+    description: 'Entra ID application (client) ID'
+    required: true
+  client_secret:
+    description: 'Entra ID client secret'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - id: signal
+      shell: pwsh
+      run: |
+        try {
+          $inputUrl = "${{ inputs.builds_service_url }}".Trim()
+          $url = if ($inputUrl) { $inputUrl.TrimEnd('/') } else { 'https://builds.wcdconnect.com' }
+
+          $tokenUrl = "$url/api/auth/token"
+          $authBody = @{ clientId = "${{ inputs.client_id }}"; clientSecret = "${{ inputs.client_secret }}" } | ConvertTo-Json
+          $auth = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $authBody -ContentType "application/json" -TimeoutSec 15
+          if (-not $auth.accessToken) { throw "Token response did not contain accessToken" }
+
+          $token = $auth.accessToken
+          Write-Host "::add-mask::$token"
+
+          $signalBody = @{
+            repository = "$env:GITHUB_REPOSITORY"
+            event = "$env:GITHUB_EVENT_NAME"
+            ref = "$env:GITHUB_REF"
+          } | ConvertTo-Json
+          Invoke-RestMethod -Uri "$url/api/builds/queue-signal" -Method Post -Body $signalBody -ContentType "application/json" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 15 | Out-Null
+          Write-Host "Queue signal sent to $url."
+        } catch {
+          Write-Host "::warning title=WCD Builds Queue Signal Failed::$($_.Exception.Message)"
+        }
